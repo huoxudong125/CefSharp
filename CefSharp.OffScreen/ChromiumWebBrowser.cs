@@ -26,7 +26,7 @@ namespace CefSharp.OffScreen
         /// Need a lock because the caller may be asking for the bitmap
         /// while Chromium async rendering has returned on another thread.
         /// </summary>
-        private readonly object bitmapLock = new object();
+        public readonly object BitmapLock = new object();
 
         /// <summary>
         /// Size of the Chromium viewport.
@@ -35,11 +35,14 @@ namespace CefSharp.OffScreen
         /// </summary>
         private Size size = new Size(1366, 768);
 
+        /// <summary>
+        /// Flag to guard the creation of the underlying offscreen browser - only one instance can be created
+        /// </summary>
+        private bool browserCreated;
+
         public bool IsBrowserInitialized { get; private set; }
         public bool IsLoading { get; set; }
-        public string Title { get; set; }
         public string TooltipText { get; set; }
-        public bool CanReload { get; private set; }
         public string Address { get; private set; }
         public bool CanGoBack { get; private set; }
         public bool CanGoForward { get; private set; }
@@ -49,14 +52,17 @@ namespace CefSharp.OffScreen
         public IDialogHandler DialogHandler { get; set; }
         public IDownloadHandler DownloadHandler { get; set; }
         public IKeyboardHandler KeyboardHandler { get; set; }
+        public ILoadHandler LoadHandler { get; set; }
         public ILifeSpanHandler LifeSpanHandler { get; set; }
-        public IPopupHandler PopupHandler { get; set; }
-        public IMenuHandler MenuHandler { get; set; }
+        public IDisplayHandler DisplayHandler { get; set; }
+        public IContextMenuHandler MenuHandler { get; set; }
         public IFocusHandler FocusHandler { get; set; }
         public IRequestHandler RequestHandler { get; set; }
         public IDragHandler DragHandler { get; set; }
         public IResourceHandlerFactory ResourceHandlerFactory { get; set; }
         public IGeolocationHandler GeolocationHandler { get; set; }
+        public IBitmapFactory BitmapFactory { get; set; }
+        public IRenderProcessMessageHandler RenderProcessMessageHandler { get; set; }
 
         public event EventHandler<LoadErrorEventArgs> LoadError;
         public event EventHandler<FrameLoadStartEventArgs> FrameLoadStart;
@@ -66,6 +72,7 @@ namespace CefSharp.OffScreen
         public event EventHandler<StatusMessageEventArgs> StatusMessage;
         public event EventHandler<LoadingStateChangedEventArgs> LoadingStateChanged;
         public event EventHandler<AddressChangedEventArgs> AddressChanged;
+        public event EventHandler<TitleChangedEventArgs> TitleChanged;
 
         /// <summary>
         /// Fired by a separate thread when Chrome has re-rendered.
@@ -79,12 +86,16 @@ namespace CefSharp.OffScreen
         /// <param name="address">Initial address (url) to load</param>
         /// <param name="browserSettings">The browser settings to use. If null, the default settings are used.</param>
         /// <param name="requestcontext">See <see cref="RequestContext"/> for more details. Defaults to null</param>
-        public ChromiumWebBrowser(string address = "", BrowserSettings browserSettings = null, RequestContext requestcontext = null)
+        /// <param name="automaticallyCreateBrowser">automatically create the underlying Browser</param>
+        public ChromiumWebBrowser(string address = "", BrowserSettings browserSettings = null,
+            RequestContext requestcontext = null, bool automaticallyCreateBrowser = true)
         {
             if (!Cef.IsInitialized && !Cef.Initialize())
             {
                 throw new InvalidOperationException("Cef::Initialize() failed");
             }
+
+            BitmapFactory = new BitmapFactory(BitmapLock);
 
             ResourceHandlerFactory = new DefaultResourceHandlerFactory();
             BrowserSettings = browserSettings ?? new BrowserSettings();
@@ -94,7 +105,12 @@ namespace CefSharp.OffScreen
             Address = address;
 
             managedCefBrowserAdapter = new ManagedCefBrowserAdapter(this, true);
-            managedCefBrowserAdapter.CreateOffscreenBrowser(IntPtr.Zero, BrowserSettings, RequestContext, address);
+
+            if(automaticallyCreateBrowser)
+            {
+                CreateBrowser(IntPtr.Zero);
+            }
+            
         }
 
         ~ChromiumWebBrowser()
@@ -153,6 +169,23 @@ namespace CefSharp.OffScreen
         }
 
         /// <summary>
+        /// Create the underlying browser. The instance address, browser settings and request context will be used.
+        /// </summary>
+        /// <param name="windowHandle">Window handle if any, IntPtr.Zero is the default</param>
+        
+        public void CreateBrowser(IntPtr windowHandle)
+        {
+            if (browserCreated)
+            {
+                throw new Exception("An instance of the underlying offscreen browser has already been created, this method can only be called once.");
+            }
+
+            browserCreated = true;
+
+            managedCefBrowserAdapter.CreateOffscreenBrowser(windowHandle, BrowserSettings, RequestContext, Address);
+        }
+
+        /// <summary>
         /// Get/set the size of the Chromium viewport, in pixels.
         /// 
         /// This also changes the size of the next screenshot.
@@ -184,7 +217,7 @@ namespace CefSharp.OffScreen
         /// </summary>
         public Bitmap ScreenshotOrNull()
         {
-            lock (bitmapLock)
+            lock (BitmapLock)
             {
                 return bitmap == null ? null : new Bitmap(bitmap);
             }
@@ -201,14 +234,15 @@ namespace CefSharp.OffScreen
         /// 
         /// The bitmap size is determined by the Size property set earlier.
         /// </summary>
-        public Task<Bitmap> ScreenshotAsync()
+        /// <param name="ignoreExistingScreenshot">Ignore existing bitmap (if any) and return the next avaliable bitmap</param>
+        public Task<Bitmap> ScreenshotAsync(bool ignoreExistingScreenshot = false)
         {
             // Try our luck and see if there is already a screenshot, to save us creating a new thread for nothing.
             var screenshot = ScreenshotOrNull();
 
             var completionSource = new TaskCompletionSource<Bitmap>();
 
-            if (screenshot == null)
+            if (screenshot == null || ignoreExistingScreenshot)
             {
                 EventHandler newScreenshot = null; // otherwise we cannot reference ourselves in the anonymous method below
 
@@ -244,6 +278,10 @@ namespace CefSharp.OffScreen
                 throw new Exception("Browser is already initialized. RegisterJsObject must be" +
                                     "called before the underlying CEF browser is created.");
             }
+
+            //Enable WCF if not already enabled
+            CefSharpSettings.WcfEnabled = true;
+
             managedCefBrowserAdapter.RegisterJsObject(name, objectToBind, camelCaseJavascriptNames);
         }
 
@@ -276,20 +314,33 @@ namespace CefSharp.OffScreen
 
         ScreenInfo IRenderWebBrowser.GetScreenInfo()
         {
-            var screenInfo = new ScreenInfo();
-
-            screenInfo.Width = size.Width;
-            screenInfo.Height = size.Height;
             //TODO: Expose NotifyScreenInfoChanged and allow user to specify their own scale factor
-            screenInfo.ScaleFactor = 1.0F;
+            var screenInfo = new ScreenInfo
+            {
+                ScaleFactor = 1.0F
+            };
 
             return screenInfo;
         }
 
+        ViewRect IRenderWebBrowser.GetViewRect()
+        {
+            var viewRect = new ViewRect
+            {
+                Width = size.Width,
+                Height = size.Height
+            };
+
+            return viewRect;
+        }
+
         BitmapInfo IRenderWebBrowser.CreateBitmapInfo(bool isPopup)
         {
-            //The bitmap buffer is 32 BPP
-            return new GdiBitmapInfo { IsPopup = isPopup, BitmapLock = bitmapLock };
+            if (BitmapFactory == null)
+            {
+                throw new Exception("BitmapFactory cannot be null");
+            }
+            return BitmapFactory.CreateBitmap(isPopup, 1.0F);
         }
 
         /// <summary>
@@ -298,6 +349,11 @@ namespace CefSharp.OffScreen
         /// </summary>
         /// <param name="bitmapInfo">information about the bitmap to be rendered</param>
         void IRenderWebBrowser.InvokeRenderAsync(BitmapInfo bitmapInfo)
+        {
+            InvokeRenderAsync(bitmapInfo);
+        }
+
+        public virtual void InvokeRenderAsync(BitmapInfo bitmapInfo)
         {
             var gdiBitmapInfo = (GdiBitmapInfo)bitmapInfo;
             if (bitmapInfo.CreateNewBitmap)
@@ -322,6 +378,11 @@ namespace CefSharp.OffScreen
         {
         }
 
+        bool IRenderWebBrowser.StartDragging(IDragData dragData, DragOperationsMask mask, int x, int y)
+        {
+            return false;
+        }
+
         void IRenderWebBrowser.SetPopupIsOpen(bool show)
         {
         }
@@ -330,12 +391,12 @@ namespace CefSharp.OffScreen
         {
         }
 
-        void IWebBrowserInternal.OnConsoleMessage(string message, string source, int line)
+        void IWebBrowserInternal.OnConsoleMessage(ConsoleMessageEventArgs args)
         {
             var handler = ConsoleMessage;
             if (handler != null)
             {
-                handler(this, new ConsoleMessageEventArgs(message, source, line));
+                handler(this, args);
             }
         }
 
@@ -368,12 +429,12 @@ namespace CefSharp.OffScreen
             }
         }
 
-        void IWebBrowserInternal.OnLoadError(IFrame frame, CefErrorCode errorCode, string errorText, string failedUrl)
+        void IWebBrowserInternal.OnLoadError(LoadErrorEventArgs args)
         {
             var handler = LoadError;
             if (handler != null)
             {
-                handler(this, new LoadErrorEventArgs(frame, errorCode, errorText, failedUrl));
+                handler(this, args);
             }
         }
 
@@ -389,43 +450,46 @@ namespace CefSharp.OffScreen
             get { return IntPtr.Zero; }
         }
 
-        void IWebBrowserInternal.OnStatusMessage(string value)
+        void IWebBrowserInternal.OnStatusMessage(StatusMessageEventArgs args)
         {
             var handler = StatusMessage;
             if (handler != null)
             {
-                handler(this, new StatusMessageEventArgs(value));
+                handler(this, args);
             }
         }
 
-        void IWebBrowserInternal.SetAddress(string address)
+        void IWebBrowserInternal.SetAddress(AddressChangedEventArgs args)
         {
-            Address = address;
+            Address = args.Address;
 
             var handler = AddressChanged;
             if (handler != null)
             {
-                handler(this, new AddressChangedEventArgs(address));
+                handler(this, args);
             }
         }
 
-        void IWebBrowserInternal.SetLoadingStateChange(bool canGoBack, bool canGoForward, bool isLoading)
+        void IWebBrowserInternal.SetLoadingStateChange(LoadingStateChangedEventArgs args)
         {
-            CanGoBack = canGoBack;
-            CanGoForward = canGoForward;
-            CanReload = !isLoading;
-            IsLoading = isLoading;
+            CanGoBack = args.CanGoBack;
+            CanGoForward = args.CanGoForward;
+            IsLoading = args.IsLoading;
 
             var handler = LoadingStateChanged;
             if (handler != null)
             {
-                handler(this, new LoadingStateChangedEventArgs(canGoBack, canGoForward, isLoading));
+                handler(this, args);
             }
         }
 
-        void IWebBrowserInternal.SetTitle(string title)
+        void IWebBrowserInternal.SetTitle(TitleChangedEventArgs args)
         {
-            Title = title;
+            var handler = TitleChanged;
+            if (handler != null)
+            {
+                handler(this, args);
+            }
         }
 
         void IWebBrowserInternal.SetTooltipText(string tooltipText)

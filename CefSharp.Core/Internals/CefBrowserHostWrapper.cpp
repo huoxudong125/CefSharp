@@ -3,7 +3,13 @@
 // Use of this source code is governed by a BSD-style license that can be found in the LICENSE file.
 
 #include "Stdafx.h"
+#include "include\cef_client.h"
+
 #include "CefBrowserHostWrapper.h"
+#include "CefPdfPrintCallbackWrapper.h"
+#include "WindowInfo.h"
+#include "CefTaskScheduler.h"
+#include "Cef.h"
 
 void CefBrowserHostWrapper::StartDownload(String^ url)
 {
@@ -17,6 +23,31 @@ void CefBrowserHostWrapper::Print()
     ThrowIfDisposed();
 
     _browserHost->Print();
+}
+
+Task<bool>^ CefBrowserHostWrapper::PrintToPdfAsync(String^ path, PdfPrintSettings^ settings)
+{
+    CefPdfPrintSettings nativeSettings;
+    if (settings != nullptr)
+    {
+        StringUtils::AssignNativeFromClr(nativeSettings.header_footer_title, settings->HeaderFooterTitle);
+        StringUtils::AssignNativeFromClr(nativeSettings.header_footer_url, settings->HeaderFooterUrl);
+        nativeSettings.backgrounds_enabled = settings->BackgroundsEnabled ? 1 : 0;
+        nativeSettings.header_footer_enabled = settings->HeaderFooterEnabled ? 1 : 0;
+        nativeSettings.landscape = settings->Landscape ? 1 : 0;
+        nativeSettings.selection_only = settings->SelectionOnly ? 1 : 0;
+        nativeSettings.margin_bottom = settings->MarginBottom;
+        nativeSettings.margin_top = settings->MarginTop;
+        nativeSettings.margin_left = settings->MarginLeft;
+        nativeSettings.margin_right = settings->MarginRight;
+        nativeSettings.page_height = settings->PageHeight;
+        nativeSettings.page_width = settings->PageWidth;
+        nativeSettings.margin_type = static_cast<cef_pdf_print_margin_type_t>(settings->MarginType);
+    }
+
+    auto printToPdfTask = gcnew TaskPrintToPdf();
+    _browserHost->PrintToPDF(StringUtils::ToNative(path), nativeSettings, new CefPdfPrintCallbackWrapper(printToPdfTask));
+    return printToPdfTask->Task;
 }
 
 void CefBrowserHostWrapper::SetZoomLevel(double zoomLevel)
@@ -53,16 +84,25 @@ void CefBrowserHostWrapper::CloseBrowser(bool forceClose)
     _browserHost->CloseBrowser(forceClose);
 }
 
-void CefBrowserHostWrapper::ShowDevTools()
+void CefBrowserHostWrapper::ShowDevTools(IWindowInfo^ windowInfo, int inspectElementAtX, int inspectElementAtY)
 {
     ThrowIfDisposed();
 
-    CefWindowInfo windowInfo;
     CefBrowserSettings settings;
+    CefWindowInfo nativeWindowInfo;
 
-    windowInfo.SetAsPopup(_browserHost->GetWindowHandle(), "DevTools");
+    if(windowInfo == nullptr)
+    {
+        nativeWindowInfo.SetAsPopup(_browserHost->GetWindowHandle(), "DevTools");
+    }
+    else
+    {
+        auto cefWindowInfoWrapper = static_cast<WindowInfo^>(windowInfo);
 
-    _browserHost->ShowDevTools(windowInfo, _browserHost->GetClient(), settings, CefPoint());
+        nativeWindowInfo = *cefWindowInfoWrapper->GetWindowInfo();
+    }
+
+    _browserHost->ShowDevTools(nativeWindowInfo, _browserHost->GetClient(), settings, CefPoint(inspectElementAtX, inspectElementAtY));
 }
 
 void CefBrowserHostWrapper::CloseDevTools()
@@ -189,10 +229,12 @@ void CefBrowserHostWrapper::SendMouseMoveEvent(int x, int y, bool mouseLeave, Ce
     _browserHost->SendMouseMoveEvent(mouseEvent, mouseLeave);
 }
 
-void CefBrowserHostWrapper::ThrowIfDisposed()
+int CefBrowserHostWrapper::WindowlessFrameRate::get()
 {
-    if (_disposed)
-    {
-        throw gcnew ObjectDisposedException(gcnew String(L"This CefSharp IBrowserHost instance has been disposed!"));
-    }
+    return _browserHost->GetWindowlessFrameRate();
+}
+
+void CefBrowserHostWrapper::WindowlessFrameRate::set(int val)
+{
+    _browserHost->SetWindowlessFrameRate(val);
 }

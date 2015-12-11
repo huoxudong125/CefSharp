@@ -11,12 +11,23 @@ namespace CefSharp
     {
         void StartDownload(string url);
         void Print();
+
+        /// <summary>
+        /// Asynchronously prints the current browser contents to the Pdf file specified.
+        /// The caller is responsible for deleting the file when done.
+        /// </summary>
+        /// <param name="path">Output file location.</param>
+        /// <param name="settings">Print Settings.</param>
+        /// <returns>A task that represents the asynchronous print operation.
+        /// The result is true on success or false on failure to generate the Pdf.</returns>
+        Task<bool> PrintToPdfAsync(string path, PdfPrintSettings settings = null);
+
         void SetZoomLevel(double zoomLevel);
         Task<double> GetZoomLevelAsync();
         IntPtr GetWindowHandle();
         void CloseBrowser(bool forceClose);
-        
-        void ShowDevTools();
+
+        void ShowDevTools(IWindowInfo windowInfo = null, int inspectElementAtX = 0, int inspectElementAtY = 0);
         void CloseDevTools();
 
         void AddWordToDictionary(string word);
@@ -79,5 +90,20 @@ namespace CefSharp
         /// <param name="mouseLeave">mouse leave</param>
         /// <param name="modifiers">click modifiers .e.g Ctrl</param>
         void SendMouseMoveEvent(int x, int y, bool mouseLeave, CefEventFlags modifiers);
+
+        /// <summary>
+        /// Gets/sets the maximum rate in frames per second (fps) that CefRenderHandler::
+        /// OnPaint will be called for a windowless browser. The actual fps may be
+        /// lower if the browser cannot generate frames at the requested rate. The
+        /// minimum value is 1 and the maximum value is 60 (default 30). This method
+        /// can only be called on the UI thread. Can also be set at browser creation
+        /// via BrowserSettings.WindowlessFrameRate.
+        /// </summary>
+        int WindowlessFrameRate { get; set;}
+
+        /// <summary>
+        /// Gets a value indicating whether the browserHost has been disposed of.
+        /// </summary>
+        bool IsDisposed { get; }
     }
 }

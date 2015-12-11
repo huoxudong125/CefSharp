@@ -16,10 +16,13 @@ namespace CefSharp
             Browser = browser;
             Frame = frame;
             Url = frame.Url;
-            IsMainFrame = frame.IsMain;
         }
 
+        /// <summary>
+        /// The browser object
+        /// </summary>
         public IBrowser Browser { get; private set;}
+
         /// <summary>
         /// The frame that just started loading.
         /// </summary>
@@ -29,10 +32,5 @@ namespace CefSharp
         /// The URL that was loaded.
         /// </summary>
         public string Url { get; private set; }
-
-        /// <summary>
-        /// Is this the Main Frame
-        /// </summary>
-        public bool IsMainFrame { get; private set; }
     }
 }

@@ -23,6 +23,8 @@ namespace CefSharp
         /// time. Sub-frames may start or continue loading after the main frame load has ended. This method may not be called for a
         /// particular frame if the load request for that frame fails. For notification of overall browser load status use
         /// OnLoadingStateChange instead.
+        /// This event will be called on the CEF UI thread.
+        /// Blocking this thread will likely cause your UI to become unresponsive and/or hang.
         /// </summary>
         event EventHandler<FrameLoadStartEventArgs> FrameLoadStart;
 
@@ -30,11 +32,15 @@ namespace CefSharp
         /// Event handler that will get called when the browser is done loading a frame. Multiple frames may be loading at the same
         /// time. Sub-frames may start or continue loading after the main frame load has ended. This method will always be called
         /// for all frames irrespective of whether the request completes successfully.
+        /// This event will be called on the CEF UI thread.
+        /// Blocking this thread will likely cause your UI to become unresponsive and/or hang.
         /// </summary>
         event EventHandler<FrameLoadEndEventArgs> FrameLoadEnd;
 
         /// <summary>
         /// Event handler that will get called when the resource load for a navigation fails or is canceled.
+        /// This event will be called on the CEF UI thread.
+        /// Blocking this thread will likely cause your UI to become unresponsive and/or hang.
         /// </summary>
         event EventHandler<LoadErrorEventArgs> LoadError;
 
@@ -42,6 +48,8 @@ namespace CefSharp
         /// Event handler that will get called when the Loading state has changed.
         /// This event will be fired twice. Once when loading is initiated either programmatically or
         /// by user action, and once when loading is terminated due to completion, cancellation of failure. 
+        /// This event will be called on the CEF UI thread.
+        /// Blocking this thread will likely cause your UI to become unresponsive and/or hang.
         /// </summary>
         event EventHandler<LoadingStateChangedEventArgs> LoadingStateChanged;
 
@@ -83,9 +91,14 @@ namespace CefSharp
         IRequestHandler RequestHandler { get; set; }
 
         /// <summary>
-        /// Implement <see cref="IPopupHandler"/> and assign to handle events related to popup window events.
+        /// Implement <see cref="IDisplayHandler"/> and assign to handle events related to browser display state.
         /// </summary>
-        IPopupHandler PopupHandler { get; set; }
+        IDisplayHandler DisplayHandler { get; set; }
+
+        /// <summary>
+        /// Implement <see cref="ILoadHandler"/> and assign to handle events related to browser load status.
+        /// </summary>
+        ILoadHandler LoadHandler { get; set; }
 
         /// <summary>
         /// Implement <see cref="ILifeSpanHandler"/> and assign to handle events related to popups.
@@ -113,9 +126,9 @@ namespace CefSharp
         IDownloadHandler DownloadHandler { get; set; }
 
         /// <summary>
-        /// Implement <see cref="IMenuHandler"/> and assign to handle events related to the browser context menu
+        /// Implement <see cref="IContextMenuHandler"/> and assign to handle events related to the browser context menu
         /// </summary>
-        IMenuHandler MenuHandler { get; set; }
+        IContextMenuHandler MenuHandler { get; set; }
 
         /// <summary>
         /// Implement <see cref="IFocusHandler"/> and assign to handle events related to the browser component's focus
@@ -131,6 +144,11 @@ namespace CefSharp
         /// Implement <see cref="IGeolocationHandler"/> and assign to handle requests for permission to use geolocation.
         /// </summary>
         IGeolocationHandler GeolocationHandler { get; set; }
+
+        /// <summary>
+        /// Implement <see cref="IRenderProcessMessageHandler"/> and assign to handle messages from the render process. 
+        /// </summary>
+        IRenderProcessMessageHandler RenderProcessMessageHandler { get; set; }
 
         /// <summary>
         /// A flag that indicates whether the WebBrowser is initialized (true) or not (false).
@@ -161,26 +179,12 @@ namespace CefSharp
         bool CanGoForward { get; }
 
         /// <summary>
-        /// A flag that indicates whether the state of the control currently supports the Reload action (true) or not (false).
-        /// </summary>
-        /// <remarks>In the WPF control, this property is implemented as a Dependency Property and fully supports data
-        /// binding.</remarks>
-        bool CanReload { get; }
-
-        /// <summary>
         /// The address (URL) which the browser control is currently displaying.
         /// Will automatically be updated as the user navigates to another page (e.g. by clicking on a link).
         /// </summary>
         /// <remarks>In the WPF control, this property is implemented as a Dependency Property and fully supports data
         /// binding.</remarks>
         string Address { get; }
-
-        /// <summary>
-        /// The title of the web page being currently displayed.
-        /// </summary>
-        /// <remarks>In the WPF control, this property is implemented as a Dependency Property and fully supports data
-        /// binding.</remarks>
-        string Title { get; }
 
         /// <summary>
         /// The text that will be displayed as a ToolTip

@@ -4,6 +4,8 @@
 
 #pragma once
 
+#include "Stdafx.h"
+
 #include <msclr/lock.h>
 #include <include/cef_version.h>
 #include <include/cef_runnable.h>
@@ -11,17 +13,12 @@
 #include <include/cef_web_plugin.h>
 
 #include "Internals/CefSharpApp.h"
-#include "Internals/CookieVisitor.h"
 #include "Internals/CookieManager.h"
-#include "Internals/CompletionHandler.h"
-#include "Internals/StringUtils.h"
 #include "Internals/PluginVisitor.h"
-#include "ManagedCefBrowserAdapter.h"
 #include "CefSettings.h"
-#include "ResourceHandlerWrapper.h"
 #include "SchemeHandlerFactoryWrapper.h"
 #include "Internals/CefTaskScheduler.h"
-#include "CookieAsyncWrapper.h"
+#include "Internals/CefGetGeolocationCallbackWrapper.h"
 
 using namespace System::Collections::Generic; 
 using namespace System::Linq;
@@ -137,7 +134,10 @@ namespace CefSharp
             }
         }
 
-        /// <summary>Initializes CefSharp with the default settings.</summary>
+        /// <summary>
+        /// Initializes CefSharp with the default settings.
+        /// This function should be called on the main application thread to initialize the CEF browser process.
+        /// </summary>
         /// <return>true if successful; otherwise, false.</return>
         static bool Initialize()
         {
@@ -145,7 +145,10 @@ namespace CefSharp
             return Initialize(cefSettings);
         }
 
-        /// <summary>Initializes CefSharp with user-provided settings.</summary>
+        /// <summary>
+        /// Initializes CefSharp with user-provided settings.
+        /// This function should be called on the main application thread to initialize the CEF browser process.
+        /// </summary>
         /// <param name="cefSettings">CefSharp configuration settings.</param>
         /// <return>true if successful; otherwise, false.</return>
         static bool Initialize(CefSettings^ cefSettings)
@@ -153,7 +156,10 @@ namespace CefSharp
             return Initialize(cefSettings, true, false);
         }
 
-        /// <summary>Initializes CefSharp with user-provided settings.</summary>
+        /// <summary>
+        /// Initializes CefSharp with user-provided settings.
+        /// This function should be called on the main application thread to initialize the CEF browser process.
+        /// </summary>
         /// <param name="cefSettings">CefSharp configuration settings.</param>
         /// <param name="shutdownOnProcessExit">When the Current AppDomain (relative to the thread called on)
         /// Exits(ProcessExit event) then Shudown will be called.</param>
@@ -203,6 +209,37 @@ namespace CefSharp
             }
 
             return success;
+        }
+
+        /// <summary>Perform a single iteration of CEF message loop processing. This function is
+        /// used to integrate the CEF message loop into an existing application message
+        /// loop. Care must be taken to balance performance against excessive CPU usage.
+        /// This function should only be called on the main application thread and only
+        /// if CefInitialize() is called with a CefSettings.multi_threaded_message_loop
+        /// value of false. This function will not block.</summary>
+        static void DoMessageLoopWork()
+        {
+            CefDoMessageLoopWork();
+        }
+
+
+        /// <summary>
+        /// This function should be called from the application entry point function to execute a secondary process.
+        /// It can be used to run secondary processes from the browser client executable (default behavior) or
+        /// from a separate executable specified by the CefSettings.browser_subprocess_path value.
+        /// If called for the browser process (identified by no "type" command-line value) it will return immediately with a value of -1.
+        /// If called for a recognized secondary process it will block until the process should exit and then return the process exit code.
+        /// The |application| parameter may be empty. The |windows_sandbox_info| parameter is only used on Windows and may be NULL (see cef_sandbox_win.h for details). 
+        /// </summary>
+        static int ExecuteProcess()
+        {
+            auto hInstance = Process::GetCurrentProcess()->Handle;
+
+            CefMainArgs cefMainArgs((HINSTANCE)hInstance.ToPointer());
+            //TODO: Look at ways to expose an instance of CefApp
+            //CefRefPtr<CefSharpApp> app(new CefSharpApp(nullptr, nullptr));
+
+            return CefExecuteProcess(cefMainArgs, NULL, NULL);
         }
 
         /// <summary>Add an entry to the cross-origin whitelist.</summary>
@@ -299,11 +336,17 @@ namespace CefSharp
         static ICookieManager^ GetGlobalCookieManager()
         {
             auto cookieManager = CefCookieManager::GetGlobalManager(NULL);
-            return gcnew CookieManager(cookieManager);
+            if (cookieManager.get())
+            {
+                return gcnew CookieManager(cookieManager);
+            }
+            return nullptr;
         }
 
-        /// <summary>Shuts down CefSharp and the underlying CEF infrastructure. This method is safe to call multiple times; it will only
+        /// <summary>
+        /// Shuts down CefSharp and the underlying CEF infrastructure. This method is safe to call multiple times; it will only
         /// shut down CEF on the first call (all subsequent calls will be ignored).
+        /// This function should be called on the main application thread to shut down the CEF browser process before the application exits. 
         /// </summary>
         static void Shutdown()
         {
@@ -409,6 +452,31 @@ namespace CefSharp
         static void ForceWebPluginShutdown(String^ path)
         {
             CefForceWebPluginShutdown(StringUtils::ToNative(path));
+        }
+
+        /// <summary>
+        /// Call during process startup to enable High-DPI support on Windows 7 or newer.
+        /// Older versions of Windows should be left DPI-unaware because they do not
+        /// support DirectWrite and GDI fonts are kerned very badly.
+        /// </summary>
+        static void EnableHighDPISupport()
+        {
+            CefEnableHighDPISupport();
+        }
+
+        /// <summary>
+        /// Request a one-time geolocation update.
+        /// This function bypasses any user permission checks so should only be
+        /// used by code that is allowed to access location information. 
+        /// </summary>
+        /// <return>Returns 'best available' location info or, if the location update failed, with error info.</return>
+        static Task<Geoposition^>^ GetGeolocationAsync()
+        {
+            auto callback = new CefGetGeolocationCallbackWrapper();
+            
+            CefGetGeolocation(callback);
+
+            return callback->GetTask();
         }
     };
 }

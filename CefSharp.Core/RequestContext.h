@@ -5,11 +5,10 @@
 #pragma once
 
 #include "Stdafx.h"
-#include "Internals\MCefRefPtr.h"
-#include "RequestContextSettings.h"
 #include "include\cef_request_context.h"
-
-using namespace CefSharp;
+#include "RequestContextSettings.h"
+#include "SchemeHandlerFactoryWrapper.h"
+#include "RequestContextHandler.h"
 
 namespace CefSharp
 {
@@ -43,6 +42,17 @@ namespace CefSharp
             _requestContext = CefRequestContext::CreateContext(settings, NULL);
         }
 
+        RequestContext(IPluginHandler^ pluginHandler)
+        {
+            CefRequestContextSettings settings;
+            _requestContext = CefRequestContext::CreateContext(settings, new RequestContextHandler(pluginHandler));
+        }
+
+        RequestContext(RequestContextSettings^ settings, IPluginHandler^ pluginHandler) : _settings(settings)
+        {
+            _requestContext = CefRequestContext::CreateContext(settings, new RequestContextHandler(pluginHandler));
+        }
+
         !RequestContext()
         {
             _requestContext = NULL;
@@ -53,6 +63,17 @@ namespace CefSharp
             this->!RequestContext();
 
             delete _settings;
+        }
+
+        bool RegisterSchemeHandlerFactory(String^ schemeName, String^ domainName, ISchemeHandlerFactory^ factory)
+        {
+            auto wrapper = new SchemeHandlerFactoryWrapper(factory);
+            return _requestContext->RegisterSchemeHandlerFactory(StringUtils::ToNative(schemeName), StringUtils::ToNative(domainName), wrapper);
+        }
+
+        bool ClearSchemeHandlerFactories()
+        {
+            return _requestContext->ClearSchemeHandlerFactories();
         }
 
         operator CefRefPtr<CefRequestContext>()

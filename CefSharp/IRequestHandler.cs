@@ -3,7 +3,6 @@
 // Use of this source code is governed by a BSD-style license that can be found in the LICENSE file.
 
 using System;
-using System.Collections.Generic;
 
 namespace CefSharp
 {
@@ -24,6 +23,29 @@ namespace CefSharp
         bool OnBeforeBrowse(IWebBrowser browserControl, IBrowser browser, IFrame frame, IRequest request, bool isRedirect);
 
         /// <summary>
+        /// Called on the UI thread before OnBeforeBrowse in certain limited cases
+        /// where navigating a new or different browser might be desirable. This
+        /// includes user-initiated navigation that might open in a special way (e.g.
+        /// links clicked via middle-click or ctrl + left-click) and certain types of
+        /// cross-origin navigation initiated from the renderer process (e.g.
+        /// navigating the top-level frame to/from a file URL).
+        /// </summary>
+        /// <param name="browserControl">the ChromiumWebBrowser control</param>
+        /// <param name="browser">the browser object</param>
+        /// <param name="frame">The frame object</param>
+        /// <param name="targetUrl">target url</param>
+        /// <param name="targetDisposition">The value indicates where the user intended to navigate the browser based
+        /// on standard Chromium behaviors (e.g. current tab, new tab, etc). </param>
+        /// <param name="userGesture">The value will be true if the browser navigated via explicit user gesture
+        /// (e.g. clicking a link) or false if it navigated automatically (e.g. via the DomContentLoaded event).</param>
+        /// <returns>Return true to cancel the navigation or false to allow the navigation
+        /// to proceed in the source browser's top-level frame.</returns>
+        bool OnOpenUrlFromTab(IWebBrowser browserControl, IBrowser browser, IFrame frame,
+                              string targetUrl,
+                              WindowOpenDisposition targetDisposition,
+                              bool userGesture);
+
+        /// <summary>
         /// Called to handle requests for URLs with an invalid SSL certificate.
         /// Return true and call <see cref="IRequestCallback.Continue"/> either
         /// in this method or at a later time to continue or cancel the request.  
@@ -34,11 +56,12 @@ namespace CefSharp
         /// <param name="browser">the browser object</param>
         /// <param name="errorCode">the error code for this invalid certificate</param>
         /// <param name="requestUrl">the url of the request for the invalid certificate</param>
+        /// <param name="sslInfo">ssl certificate information</param>
         /// <param name="callback">Callback interface used for asynchronous continuation of url requests.
         /// If empty the error cannot be recovered from and the request will be canceled automatically.</param>
         /// <returns>Return false to cancel the request immediately. Return true and use <see cref="IRequestCallback"/> to
         /// execute in an async fashion.</returns>
-        bool OnCertificateError(IWebBrowser browserControl, IBrowser browser, CefErrorCode errorCode, string requestUrl, IRequestCallback callback);
+        bool OnCertificateError(IWebBrowser browserControl, IBrowser browser, CefErrorCode errorCode, string requestUrl, ISslInfo sslInfo, IRequestCallback callback);
 
         /// <summary>
         /// Called when a plugin has crashed
@@ -54,8 +77,8 @@ namespace CefSharp
         /// </summary>
         /// <param name="browserControl">The ChromiumWebBrowser control</param>
         /// <param name="browser">the browser object</param>
-        /// <param name="request">the request object - can be modified in this callback.</param>
         /// <param name="frame">The frame object</param>
+        /// <param name="request">the request object - can be modified in this callback.</param>
         /// <param name="callback">Callback interface used for asynchronous continuation of url requests.</param>
         /// <returns>To cancel loading of the resource return <see cref="CefReturnValue.Cancel"/>
         /// or <see cref="CefReturnValue.Continue"/> to allow the resource to load normally. For async
@@ -76,17 +99,6 @@ namespace CefSharp
         /// <param name="callback">Callback interface used for asynchronous continuation of authentication requests.</param>
         /// <returns>Return true to continue the request and call CefAuthCallback::Continue() when the authentication information is available. Return false to cancel the request. </returns>
         bool GetAuthCredentials(IWebBrowser browserControl, IBrowser browser, IFrame frame, bool isProxy, string host, int port, string realm, string scheme, IAuthCallback callback);
-
-        /// <summary>
-        /// Called on the browser process IO thread before a plugin is loaded.
-        /// </summary>
-        /// <param name="browserControl">The ChromiumWebBrowser control</param>
-        /// <param name="browser">the browser object</param>
-        /// <param name="url">URL</param>
-        /// <param name="policyUrl">policy URL</param>
-        /// <param name="info">plugin information</param>
-        /// <returns>Return true to block loading of the plugin.</returns>
-        bool OnBeforePluginLoad(IWebBrowser browserControl, IBrowser browser, string url, string policyUrl, WebPluginInfo info);
 
         /// <summary>
         /// Called when the render process terminates unexpectedly.
@@ -133,11 +145,42 @@ namespace CefSharp
         bool OnProtocolExecution(IWebBrowser browserControl, IBrowser browser, string url);
 
         /// <summary>
-        /// Called when the page icon changes.
+        /// Called on the browser process UI thread when the render view associated
+        /// with browser is ready to receive/handle IPC messages in the render
+        /// process.
         /// </summary>
         /// <param name="browserControl">The ChromiumWebBrowser control</param>
         /// <param name="browser">the browser object</param>
-        /// <param name="urls">list of urls where the favicons can be downloaded</param>
-        void OnFaviconUrlChange(IWebBrowser browserControl, IBrowser browser, IList<string> urls);
+        void OnRenderViewReady(IWebBrowser browserControl, IBrowser browser);
+
+        
+        /// <summary>
+        /// Called on the CEF IO thread when a resource response is received.
+        /// To allow the resource to load normally return false.
+        /// To redirect or retry the resource modify request (url, headers or post body) and return true.
+        /// The response object cannot be modified in this callback. 
+        /// </summary>
+        /// <param name="browserControl">The ChromiumWebBrowser control</param>
+        /// <param name="browser">the browser object</param>
+        /// <param name="frame">The frame that is being redirected.</param>
+        /// <param name="request">the request object</param>
+        /// <param name="response">the response object - cannot be modified in this callback</param>
+        /// <returns>
+        /// To allow the resource to load normally return false.
+        /// To redirect or retry the resource modify request (url, headers or post body) and return true.
+        /// </returns>
+        bool OnResourceResponse(IWebBrowser browserControl, IBrowser browser, IFrame frame, IRequest request, IResponse response);
+
+        /// <summary>
+        /// Called on the CEF IO thread when a resource load has completed.
+        /// </summary>
+        /// <param name="browserControl">The ChromiumWebBrowser control</param>
+        /// <param name="browser">the browser object</param>
+        /// <param name="frame">The frame that is being redirected.</param>
+        /// <param name="request">the request object - cannot be modified in this callback</param>
+        /// <param name="response">the response object - cannot be modified in this callback</param>
+        /// <param name="status">indicates the load completion status</param>
+        /// <param name="receivedContentLength">is the number of response bytes actually read.</param>
+        void OnResourceLoadComplete(IWebBrowser browserControl, IBrowser browser, IFrame frame, IRequest request, IResponse response, UrlRequestStatus status, long receivedContentLength);
     }
 }

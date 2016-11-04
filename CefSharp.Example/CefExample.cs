@@ -1,4 +1,4 @@
-﻿// Copyright © 2010-2015 The CefSharp Authors. All rights reserved.
+﻿// Copyright © 2010-2016 The CefSharp Authors. All rights reserved.
 //
 // Use of this source code is governed by a BSD-style license that can be found in the LICENSE file.
 
@@ -6,8 +6,11 @@ using System;
 using System.Diagnostics;
 using System.Text;
 using System.Threading.Tasks;
+using CefSharp.Example.Handlers;
 using CefSharp.Example.Properties;
 using CefSharp.Example.Proxy;
+using CefSharp.Internals;
+using CefSharp.SchemeHandler;
 
 namespace CefSharp.Example
 {
@@ -17,7 +20,10 @@ namespace CefSharp.Example
         public const string BindingTestUrl = "custom://cefsharp/BindingTest.html";
         public const string PluginsTestUrl = "custom://cefsharp/plugins.html";
         public const string PopupTestUrl = "custom://cefsharp/PopupTest.html";
+        public const string TooltipTestUrl = "custom://cefsharp/TooltipTest.html";
         public const string BasicSchemeTestUrl = "custom://cefsharp/SchemeTest.html";
+        public const string ResponseFilterTestUrl = "custom://cefsharp/ResponseFilterTest.html";
+        public const string DraggableRegionTestUrl = "custom://cefsharp/DraggableRegionTest.html";
         public const string TestResourceUrl = "http://test/resource/load";
         public const string RenderProcessCrashedUrl = "http://processcrashed";
         public const string TestUnicodeResourceUrl = "http://test/resource/loadUnicode";
@@ -27,7 +33,7 @@ namespace CefSharp.Example
         private static readonly bool DebuggingSubProcess = Debugger.IsAttached;
         private static string PluginInformation = "";
 
-        public static void Init(bool osr, bool multiThreadedMessageLoop)
+        public static void Init(bool osr, bool multiThreadedMessageLoop, IBrowserProcessHandler browserProcessHandler)
         {
             // Set Google API keys, used for Geolocation requests sans GPS.  See http://www.chromium.org/developers/how-tos/api-keys
             // Environment.SetEnvironmentVariable("GOOGLE_API_KEY", "");
@@ -51,9 +57,17 @@ namespace CefSharp.Example
             //settings.CefCommandLineArgs.Add("debug-plugin-loading", "1"); //Dumps extra logging about plugin loading to the log file.
             //settings.CefCommandLineArgs.Add("disable-plugins-discovery", "1"); //Disable discovering third-party plugins. Effectively loading only ones shipped with the browser plus third-party ones as specified by --extra-plugin-dir and --load-plugin switches
             //settings.CefCommandLineArgs.Add("enable-system-flash", "1"); //Automatically discovered and load a system-wide installation of Pepper Flash.
+            //settings.CefCommandLineArgs.Add("allow-running-insecure-content", "1"); //By default, an https page cannot run JavaScript, CSS or plugins from http URLs. This provides an override to get the old insecure behavior. Only available in 47 and above.
 
-            //settings.CefCommandLineArgs.Add("ppapi-flash-path", @"C:\WINDOWS\SysWOW64\Macromed\Flash\pepflashplayer32_18_0_0_209.dll"); //Load a specific pepper flash version (Step 1 of 2)
-            //settings.CefCommandLineArgs.Add("ppapi-flash-version", "18.0.0.209"); //Load a specific pepper flash version (Step 2 of 2)
+            //settings.CefCommandLineArgs.Add("enable-logging", "1"); //Enable Logging for the Renderer process (will open with a cmd prompt and output debug messages - use in conjunction with setting LogSeverity = LogSeverity.Verbose;)
+            //settings.LogSeverity = LogSeverity.Verbose; // Needed for enable-logging to output messages
+
+            //settings.CefCommandLineArgs.Add("disable-extensions", "1"); //Extension support can be disabled
+            //settings.CefCommandLineArgs.Add("disable-pdf-extension", "1"); //The PDF extension specifically can be disabled
+
+            //Load the pepper flash player that comes with Google Chrome - may be possible to load these values from the registry and query the dll for it's version info (Step 2 not strictly required it seems)
+            //settings.CefCommandLineArgs.Add("ppapi-flash-path", @"C:\Program Files (x86)\Google\Chrome\Application\47.0.2526.106\PepperFlash\pepflashplayer.dll"); //Load a specific pepper flash version (Step 1 of 2)
+            //settings.CefCommandLineArgs.Add("ppapi-flash-version", "20.0.0.228"); //Load a specific pepper flash version (Step 2 of 2)
 
             //NOTE: For OSR best performance you should run with GPU disabled:
             // `--disable-gpu --disable-gpu-compositing --enable-begin-frame-scheduling`
@@ -74,16 +88,19 @@ namespace CefSharp.Example
             //settings.CefCommandLineArgs.Add("disable-direct-write", "1");
 
             settings.MultiThreadedMessageLoop = multiThreadedMessageLoop;
+            settings.ExternalMessagePump = !multiThreadedMessageLoop;
 
             // Off Screen rendering (WPF/Offscreen)
             if(osr)
             {
                 settings.WindowlessRenderingEnabled = true;
-                // Disable Surfaces so internal PDF viewer works for OSR
-                // https://bitbucket.org/chromiumembedded/cef/issues/1689
-                //settings.CefCommandLineArgs.Add("disable-surfaces", "1");
-                settings.EnableInternalPdfViewerOffScreen();
-                settings.CefCommandLineArgs.Add("enable-begin-frame-scheduling", "1");
+
+                //Disable Direct Composition to test https://github.com/cefsharp/CefSharp/issues/1634
+                //settings.CefCommandLineArgs.Add("disable-direct-composition", "1");
+                
+                // DevTools doesn't seem to be working when this is enabled
+                // http://magpcss.org/ceforum/viewtopic.php?f=6&t=14095
+                //settings.CefCommandLineArgs.Add("enable-begin-frame-scheduling", "1");
             }
 
             var proxy = ProxyConfig.GetProxyInformation();
@@ -107,7 +124,7 @@ namespace CefSharp.Example
                 }
             }
             
-            settings.LogSeverity = LogSeverity.Verbose;
+            //settings.LogSeverity = LogSeverity.Verbose;
 
             if (DebuggingSubProcess)
             {
@@ -119,6 +136,7 @@ namespace CefSharp.Example
             {
                 SchemeName = CefSharpSchemeHandlerFactory.SchemeName,
                 SchemeHandlerFactory = new CefSharpSchemeHandlerFactory()
+                //SchemeHandlerFactory = new InMemorySchemeAndResourceHandlerFactory()
             });
 
             settings.RegisterScheme(new CefCustomScheme
@@ -127,18 +145,20 @@ namespace CefSharp.Example
                 SchemeHandlerFactory = new CefSharpSchemeHandlerFactory()
             });
 
+            settings.RegisterScheme(new CefCustomScheme
+            {
+                SchemeName = "localfolder",
+                SchemeHandlerFactory = new FolderSchemeHandlerFactory(rootFolder: @"..\..\..\..\CefSharp.Example\Resources",
+                                                                    schemeName: "localfolder", //Optional param no schemename checking if null
+                                                                    hostName: "cefsharp", //Optional param no hostname checking if null
+                                                                    defaultPage: "home.html") //Optional param will default to index.html
+            });			
+
             settings.RegisterExtension(new CefExtension("cefsharp/example", Resources.extension));
 
-            settings.EnableFocusedNodeChanged = true;
+            settings.FocusedNodeChangedEnabled = true;
 
-            Cef.OnContextInitialized = delegate
-            {
-                var cookieManager = Cef.GetGlobalCookieManager();
-                cookieManager.SetStoragePath("cookies", true);
-                cookieManager.SetSupportedSchemes("custom");
-            };
-
-            if (!Cef.Initialize(settings, shutdownOnProcessExit: true, performDependencyCheck: !DebuggingSubProcess))
+            if (!Cef.Initialize(settings, performDependencyCheck: !DebuggingSubProcess, browserProcessHandler: browserProcessHandler))
             {
                 throw new Exception("Unable to Initialize Cef");
             }
@@ -171,10 +191,19 @@ namespace CefSharp.Example
                     pluginBody.Append("<th>Path</th>");
                     pluginBody.Append("</tr>");
                 
-                    try
-                    {
-                        var plugins = await Cef.GetPlugins();
+                    var plugins = await Cef.GetPlugins();
 
+                    if(plugins.Count == 0)
+                    {
+                        pluginBody.Append("<tr>");
+                        pluginBody.Append("<td colspan='4'>Cef.GetPlugins returned an empty list - likely no plugins were loaded on your system</td>");
+                        pluginBody.Append("</tr>");
+                        pluginBody.Append("<tr>");
+                        pluginBody.Append("<td colspan='4'>You may find that NPAPI/PPAPI need to be enabled</td>");
+                        pluginBody.Append("</tr>");
+                    }
+                    else
+                    {
                         foreach (var plugin in plugins)
                         {
                             pluginBody.Append("<tr>");
@@ -184,15 +213,6 @@ namespace CefSharp.Example
                             pluginBody.Append("<td>" + plugin.Path + "</td>");
                             pluginBody.Append("</tr>");
                         }
-                    }
-                    catch (TaskCanceledException ex)
-                    {
-                        pluginBody.Append("<tr>");
-                        pluginBody.Append("<td colspan='4'>Cef.GetPlugins Timed out - likely no plugins were loaded on your system</td>");
-                        pluginBody.Append("</tr>");
-                        pluginBody.Append("<tr>");
-                        pluginBody.Append("<td colspan='4'>You may find that NPAPI/PPAPI need to be enabled</td>");
-                        pluginBody.Append("</tr>");
                     }
 
                     pluginBody.Append("</table></body></html>");

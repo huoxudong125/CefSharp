@@ -1,4 +1,4 @@
-﻿// Copyright © 2010-2015 The CefSharp Authors. All rights reserved.
+﻿// Copyright © 2010-2016 The CefSharp Authors. All rights reserved.
 //
 // Use of this source code is governed by a BSD-style license that can be found in the LICENSE file.
 
@@ -34,6 +34,9 @@ namespace CefSharp
         /// </summary>
         /// <param name="browserControl">The <see cref="IWebBrowser"/> control this popup is related to.</param>
         /// <param name="frameLoadStartArgs">args</param>
+        /// <remarks>Whilst thist may seem like a logical place to execute js, it's called before the DOM has been loaded, implement
+        /// <see cref="IRenderProcessMessageHandler.OnContextCreated"/> as it's called when the underlying V8Context is created
+        /// (Only called for the main frame at this stage)</remarks>
         void OnFrameLoadStart(IWebBrowser browserControl, FrameLoadStartEventArgs frameLoadStartArgs);
 
         /// <summary>

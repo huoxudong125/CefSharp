@@ -1,4 +1,4 @@
-// Copyright © 2010-2015 The CefSharp Authors. All rights reserved.
+// Copyright © 2010-2016 The CefSharp Authors. All rights reserved.
 //
 // Use of this source code is governed by a BSD-style license that can be found in the LICENSE file.
 
@@ -18,14 +18,23 @@ namespace CefSharp
         {
         private:
             gcroot<TaskCompletionSource<Geoposition^>^> _taskCompletionSource;
+            bool hasData;
 
         public:
             CefGetGeolocationCallbackWrapper()
             {
                 _taskCompletionSource = gcnew TaskCompletionSource<Geoposition^>();
+                hasData = false;
+            }
 
-                //NOTE: Use fully qualified name as TaskExtensions is ambiguious
-                CefSharp::Internals::TaskExtensions::WithTimeout<Geoposition^>(_taskCompletionSource, TimeSpan::FromMilliseconds(2000));
+            ~CefGetGeolocationCallbackWrapper()
+            {
+                if (hasData == false)
+                {
+                    //Set the result on the ThreadPool so the Task continuation is not run on the CEF UI Thread
+                    TaskExtensions::TrySetResultAsync<Geoposition^>(_taskCompletionSource, nullptr);
+                }
+                _taskCompletionSource = nullptr;
             }
 
             virtual void OnLocationUpdate(const CefGeoposition& position) OVERRIDE
@@ -42,7 +51,10 @@ namespace CefSharp
                 p->Speed = position.speed;
                 p->Timestamp = ConvertCefTimeToDateTime(position.timestamp);
 
-                _taskCompletionSource->SetResult(p);
+                //Set the result on the ThreadPool so the Task continuation is not run on the CEF UI Thread
+                TaskExtensions::TrySetResultAsync<Geoposition^>(_taskCompletionSource, p);
+
+                hasData = true;
             };
 
             DateTime ConvertCefTimeToDateTime(CefTime time)

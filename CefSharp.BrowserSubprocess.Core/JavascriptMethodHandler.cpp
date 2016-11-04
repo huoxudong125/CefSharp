@@ -1,4 +1,4 @@
-// Copyright © 2010-2015 The CefSharp Project. All rights reserved.
+// Copyright © 2010-2016 The CefSharp Project. All rights reserved.
 //
 // Use of this source code is governed by a BSD-style license that can be found in the LICENSE file.
 
@@ -14,14 +14,7 @@ namespace CefSharp
 
         for (std::vector<CefRefPtr<CefV8Value>>::size_type i = 0; i != arguments.size(); i++)
         {
-            if (arguments[i]->IsFunction())
-            {
-                parameter[i] = _callbackRegistry->Register(CefV8Context::GetCurrentContext(), arguments[i]);
-            }
-            else
-            {
-                parameter[i] = TypeUtils::ConvertFromCef(arguments[i]);
-            }
+            parameter[i] = TypeUtils::ConvertFromCef(arguments[i], _callbackRegistry);
         }
 
         try

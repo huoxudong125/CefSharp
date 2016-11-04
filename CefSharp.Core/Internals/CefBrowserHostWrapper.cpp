@@ -1,4 +1,4 @@
-// Copyright © 2010-2015 The CefSharp Authors. All rights reserved.
+// Copyright © 2010-2016 The CefSharp Authors. All rights reserved.
 //
 // Use of this source code is governed by a BSD-style license that can be found in the LICENSE file.
 
@@ -6,10 +6,57 @@
 #include "include\cef_client.h"
 
 #include "CefBrowserHostWrapper.h"
+#include "CefDragDataWrapper.h"
 #include "CefPdfPrintCallbackWrapper.h"
 #include "WindowInfo.h"
 #include "CefTaskScheduler.h"
 #include "Cef.h"
+#include "RequestContext.h"
+#include "CefNavigationEntryVisitorAdapter.h"
+
+void CefBrowserHostWrapper::DragTargetDragEnter(IDragData^ dragData, MouseEvent^ mouseEvent, DragOperationsMask allowedOperations)
+{
+    ThrowIfDisposed();
+
+    auto dragDataWrapper = static_cast<CefDragDataWrapper^>(dragData);
+    dragDataWrapper->ResetFileContents(); // Recommended by documentation to reset before calling DragEnter
+    _browserHost->DragTargetDragEnter(dragDataWrapper, GetCefMouseEvent(mouseEvent), (CefBrowserHost::DragOperationsMask) allowedOperations);
+}
+
+void CefBrowserHostWrapper::DragTargetDragOver(MouseEvent^ mouseEvent, DragOperationsMask allowedOperations)
+{
+    ThrowIfDisposed();
+
+    _browserHost->DragTargetDragOver(GetCefMouseEvent(mouseEvent), (CefBrowserHost::DragOperationsMask) allowedOperations);
+}
+
+void CefBrowserHostWrapper::DragTargetDragDrop(MouseEvent^ mouseEvent)
+{
+    ThrowIfDisposed();
+
+    _browserHost->DragTargetDrop(GetCefMouseEvent(mouseEvent));
+}
+
+void CefBrowserHostWrapper::DragSourceEndedAt(int x, int y, DragOperationsMask op)
+{
+    ThrowIfDisposed();
+
+    _browserHost->DragSourceEndedAt(x, y, (CefBrowserHost::DragOperationsMask)op);
+}
+
+void CefBrowserHostWrapper::DragTargetDragLeave()
+{
+    ThrowIfDisposed();
+
+    _browserHost->DragTargetDragLeave();
+}
+
+void CefBrowserHostWrapper::DragSourceSystemDragEnded()
+{
+    ThrowIfDisposed();
+
+    _browserHost->DragSourceSystemDragEnded();
+}
 
 void CefBrowserHostWrapper::StartDownload(String^ url)
 {
@@ -27,6 +74,17 @@ void CefBrowserHostWrapper::Print()
 
 Task<bool>^ CefBrowserHostWrapper::PrintToPdfAsync(String^ path, PdfPrintSettings^ settings)
 {
+    ThrowIfDisposed();
+
+    auto printToPdfTask = gcnew TaskPrintToPdfCallback();
+    PrintToPdf(path, settings, printToPdfTask);
+    return printToPdfTask->Task;
+}
+
+void CefBrowserHostWrapper::PrintToPdf(String^ path, PdfPrintSettings^ settings, IPrintToPdfCallback^ callback)
+{
+    ThrowIfDisposed();
+
     CefPdfPrintSettings nativeSettings;
     if (settings != nullptr)
     {
@@ -45,9 +103,7 @@ Task<bool>^ CefBrowserHostWrapper::PrintToPdfAsync(String^ path, PdfPrintSetting
         nativeSettings.margin_type = static_cast<cef_pdf_print_margin_type_t>(settings->MarginType);
     }
 
-    auto printToPdfTask = gcnew TaskPrintToPdf();
-    _browserHost->PrintToPDF(StringUtils::ToNative(path), nativeSettings, new CefPdfPrintCallbackWrapper(printToPdfTask));
-    return printToPdfTask->Task;
+    _browserHost->PrintToPDF(StringUtils::ToNative(path), nativeSettings, new CefPdfPrintCallbackWrapper(callback));
 }
 
 void CefBrowserHostWrapper::SetZoomLevel(double zoomLevel)
@@ -63,8 +119,9 @@ Task<double>^ CefBrowserHostWrapper::GetZoomLevelAsync()
 
     if (CefCurrentlyOn(TID_UI))
     {
-        TaskCompletionSource<double>^ taskSource = gcnew TaskCompletionSource<double>();
-        taskSource->SetResult(GetZoomLevelOnUI());
+        auto taskSource = gcnew TaskCompletionSource<double>();
+
+        CefSharp::Internals::TaskExtensions::TrySetResultAsync<double>(taskSource, GetZoomLevelOnUI());
         return taskSource->Task;
     }
     return Cef::UIThreadTaskFactory->StartNew(gcnew Func<double>(this, &CefBrowserHostWrapper::GetZoomLevelOnUI));
@@ -112,6 +169,13 @@ void CefBrowserHostWrapper::CloseDevTools()
     _browserHost->CloseDevTools();
 }
 
+bool CefBrowserHostWrapper::HasDevTools::get()
+{
+    ThrowIfDisposed();
+
+    return _browserHost->HasDevTools();
+}
+
 void CefBrowserHostWrapper::AddWordToDictionary(String^ word)
 {
     ThrowIfDisposed();
@@ -156,6 +220,8 @@ void CefBrowserHostWrapper::SendFocusEvent(bool setFocus)
 
 void CefBrowserHostWrapper::SendKeyEvent(KeyEvent keyEvent)
 {
+    ThrowIfDisposed();
+
     CefKeyEvent nativeKeyEvent;
     nativeKeyEvent.focus_on_editable_field = keyEvent.FocusOnEditableField == 1;
     nativeKeyEvent.is_system_key = keyEvent.IsSystemKey == 1;
@@ -167,9 +233,40 @@ void CefBrowserHostWrapper::SendKeyEvent(KeyEvent keyEvent)
     _browserHost->SendKeyEvent(nativeKeyEvent);
 }
 
-double CefBrowserHostWrapper::GetZoomLevelOnUI()
+void CefBrowserHostWrapper::SendKeyEvent(int message, int wParam, int lParam)
 {
     ThrowIfDisposed();
+
+    CefKeyEvent keyEvent;
+    keyEvent.windows_key_code = wParam;
+    keyEvent.native_key_code = lParam;
+    keyEvent.is_system_key = message == WM_SYSCHAR ||
+        message == WM_SYSKEYDOWN ||
+        message == WM_SYSKEYUP;
+
+    if (message == WM_KEYDOWN || message == WM_SYSKEYDOWN)
+    {
+        keyEvent.type = KEYEVENT_RAWKEYDOWN;
+    }
+    else if (message == WM_KEYUP || message == WM_SYSKEYUP)
+    {
+        keyEvent.type = KEYEVENT_KEYUP;
+    }
+    else
+    {
+        keyEvent.type = KEYEVENT_CHAR;
+    }
+    keyEvent.modifiers = GetCefKeyboardModifiers(wParam, lParam);
+
+    _browserHost->SendKeyEvent(keyEvent);
+}
+
+double CefBrowserHostWrapper::GetZoomLevelOnUI()
+{
+    if (_disposed)
+    {
+        return 0.0;
+    }
 
     CefTaskScheduler::EnsureOn(TID_UI, "CefBrowserHostWrapper::GetZoomLevel");
 
@@ -229,12 +326,213 @@ void CefBrowserHostWrapper::SendMouseMoveEvent(int x, int y, bool mouseLeave, Ce
     _browserHost->SendMouseMoveEvent(mouseEvent, mouseLeave);
 }
 
+void CefBrowserHostWrapper::WasResized()
+{
+    ThrowIfDisposed();
+
+    _browserHost->WasResized();
+}
+
+void CefBrowserHostWrapper::WasHidden(bool hidden)
+{
+    ThrowIfDisposed();
+
+    _browserHost->WasHidden(hidden);
+}
+
+void CefBrowserHostWrapper::GetNavigationEntries(INavigationEntryVisitor^ visitor, bool currentOnly)
+{
+    ThrowIfDisposed();
+
+    auto navEntryVisitor = new CefNavigationEntryVisitorAdapter(visitor);
+
+    _browserHost->GetNavigationEntries(navEntryVisitor, currentOnly);
+}
+
+NavigationEntry CefBrowserHostWrapper::GetVisibleNavigationEntry()
+{
+    ThrowIfDisposed();
+
+    auto entry = _browserHost->GetVisibleNavigationEntry();
+
+    NavigationEntry navEntry;
+
+    //TODO: This code is duplicated in CefNavigationEntryVisitor
+    if (entry->IsValid())
+    {
+        auto time = entry->GetCompletionTime();
+        DateTime completionTime = CefTimeUtils::ConvertCefTimeToDateTime(time.GetDoubleT());
+        navEntry = NavigationEntry(true, completionTime, StringUtils::ToClr(entry->GetDisplayURL()), entry->GetHttpStatusCode(), StringUtils::ToClr(entry->GetOriginalURL()), StringUtils::ToClr(entry->GetTitle()), (TransitionType)entry->GetTransitionType(), StringUtils::ToClr(entry->GetURL()), entry->HasPostData(), true);
+    }
+    else
+    {
+        //Invalid nav entry
+        navEntry = NavigationEntry(true, DateTime::MinValue, nullptr, -1, nullptr, nullptr, (TransitionType)-1, nullptr, false, false);
+    }
+
+    return navEntry;
+}
+
+void CefBrowserHostWrapper::NotifyMoveOrResizeStarted()
+{
+    ThrowIfDisposed();
+
+    _browserHost->NotifyMoveOrResizeStarted();
+}
+
+void CefBrowserHostWrapper::NotifyScreenInfoChanged()
+{
+    ThrowIfDisposed();
+
+    _browserHost->NotifyScreenInfoChanged();
+}
+
 int CefBrowserHostWrapper::WindowlessFrameRate::get()
 {
+    ThrowIfDisposed();
+
     return _browserHost->GetWindowlessFrameRate();
 }
 
 void CefBrowserHostWrapper::WindowlessFrameRate::set(int val)
 {
+    ThrowIfDisposed();
+
     _browserHost->SetWindowlessFrameRate(val);
+}
+
+bool CefBrowserHostWrapper::MouseCursorChangeDisabled::get()
+{
+    ThrowIfDisposed();
+
+    return _browserHost->IsMouseCursorChangeDisabled();
+}
+
+void CefBrowserHostWrapper::MouseCursorChangeDisabled::set(bool val)
+{
+    ThrowIfDisposed();
+
+    _browserHost->SetMouseCursorChangeDisabled(val);
+}
+
+bool CefBrowserHostWrapper::WindowRenderingDisabled::get()
+{
+    ThrowIfDisposed();
+
+    return _browserHost->IsWindowRenderingDisabled();
+}
+
+IntPtr CefBrowserHostWrapper::GetOpenerWindowHandle()
+{
+    ThrowIfDisposed();
+
+    return IntPtr(_browserHost->GetOpenerWindowHandle());
+}
+
+void CefBrowserHostWrapper::SendCaptureLostEvent()
+{
+    ThrowIfDisposed();
+
+    _browserHost->SendCaptureLostEvent();
+}
+
+
+IRequestContext^ CefBrowserHostWrapper::RequestContext::get()
+{
+    ThrowIfDisposed();
+
+    return gcnew CefSharp::RequestContext(_browserHost->GetRequestContext());
+}
+
+CefMouseEvent CefBrowserHostWrapper::GetCefMouseEvent(MouseEvent^ mouseEvent)
+{
+    CefMouseEvent cefMouseEvent;
+    cefMouseEvent.x = mouseEvent->X;
+    cefMouseEvent.y = mouseEvent->Y;
+    cefMouseEvent.modifiers = (uint32)mouseEvent->Modifiers;
+    return cefMouseEvent;
+}
+
+//Code imported from
+//https://bitbucket.org/chromiumembedded/branches-2062-cef3/src/a073e92426b3967f1fc2f1d3fd7711d809eeb03a/tests/cefclient/cefclient_osr_widget_win.cpp?at=master#cl-361
+int CefBrowserHostWrapper::GetCefKeyboardModifiers(WPARAM wparam, LPARAM lparam)
+{
+    int modifiers = 0;
+    if (IsKeyDown(VK_SHIFT))
+        modifiers |= EVENTFLAG_SHIFT_DOWN;
+    if (IsKeyDown(VK_CONTROL))
+        modifiers |= EVENTFLAG_CONTROL_DOWN;
+    if (IsKeyDown(VK_MENU))
+        modifiers |= EVENTFLAG_ALT_DOWN;
+
+    // Low bit set from GetKeyState indicates "toggled".
+    if (::GetKeyState(VK_NUMLOCK) & 1)
+        modifiers |= EVENTFLAG_NUM_LOCK_ON;
+    if (::GetKeyState(VK_CAPITAL) & 1)
+        modifiers |= EVENTFLAG_CAPS_LOCK_ON;
+
+    switch (wparam)
+    {
+    case VK_RETURN:
+        if ((lparam >> 16) & KF_EXTENDED)
+            modifiers |= EVENTFLAG_IS_KEY_PAD;
+        break;
+    case VK_INSERT:
+    case VK_DELETE:
+    case VK_HOME:
+    case VK_END:
+    case VK_PRIOR:
+    case VK_NEXT:
+    case VK_UP:
+    case VK_DOWN:
+    case VK_LEFT:
+    case VK_RIGHT:
+        if (!((lparam >> 16) & KF_EXTENDED))
+            modifiers |= EVENTFLAG_IS_KEY_PAD;
+        break;
+    case VK_NUMLOCK:
+    case VK_NUMPAD0:
+    case VK_NUMPAD1:
+    case VK_NUMPAD2:
+    case VK_NUMPAD3:
+    case VK_NUMPAD4:
+    case VK_NUMPAD5:
+    case VK_NUMPAD6:
+    case VK_NUMPAD7:
+    case VK_NUMPAD8:
+    case VK_NUMPAD9:
+    case VK_DIVIDE:
+    case VK_MULTIPLY:
+    case VK_SUBTRACT:
+    case VK_ADD:
+    case VK_DECIMAL:
+    case VK_CLEAR:
+        modifiers |= EVENTFLAG_IS_KEY_PAD;
+        break;
+    case VK_SHIFT:
+        if (IsKeyDown(VK_LSHIFT))
+            modifiers |= EVENTFLAG_IS_LEFT;
+        else if (IsKeyDown(VK_RSHIFT))
+            modifiers |= EVENTFLAG_IS_RIGHT;
+        break;
+    case VK_CONTROL:
+        if (IsKeyDown(VK_LCONTROL))
+            modifiers |= EVENTFLAG_IS_LEFT;
+        else if (IsKeyDown(VK_RCONTROL))
+            modifiers |= EVENTFLAG_IS_RIGHT;
+        break;
+    case VK_MENU:
+        if (IsKeyDown(VK_LMENU))
+            modifiers |= EVENTFLAG_IS_LEFT;
+        else if (IsKeyDown(VK_RMENU))
+            modifiers |= EVENTFLAG_IS_RIGHT;
+        break;
+    case VK_LWIN:
+        modifiers |= EVENTFLAG_IS_LEFT;
+        break;
+    case VK_RWIN:
+        modifiers |= EVENTFLAG_IS_RIGHT;
+        break;
+    }
+    return modifiers;
 }

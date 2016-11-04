@@ -1,4 +1,4 @@
-﻿// Copyright © 2010-2015 The CefSharp Authors. All rights reserved.
+﻿// Copyright © 2010-2016 The CefSharp Authors. All rights reserved.
 //
 // Use of this source code is governed by a BSD-style license that can be found in the LICENSE file.
 
@@ -19,7 +19,7 @@ namespace CefSharp
 {
     namespace Internals
     {
-        public ref class CefPostDataWrapper : public IPostData, public CefWrapper
+        private ref class CefPostDataWrapper : public IPostData, public CefWrapper
         {
             MCefRefPtr<CefPostData> _postData;
             List<IPostDataElement^>^ _postDataElements;
@@ -50,6 +50,8 @@ namespace CefSharp
 
                     _postDataElements = nullptr;
                 }
+
+                _disposed = true;
             }
 
         public:
@@ -151,6 +153,16 @@ namespace CefSharp
                 auto element = CefPostDataElement::Create();
 
                 return gcnew CefPostDataElementWrapper(element);
+            }
+
+            virtual property bool HasExcludedElements
+            {
+                bool get()
+                {
+                    ThrowIfDisposed();
+
+                    return _postData->HasExcludedElements();
+                }
             }
 
             void ThrowIfReadOnly()

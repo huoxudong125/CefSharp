@@ -1,10 +1,11 @@
-﻿// Copyright © 2010-2015 The CefSharp Project. All rights reserved.
+﻿// Copyright © 2010-2016 The CefSharp Project. All rights reserved.
 //
 // Use of this source code is governed by a BSD-style license that can be found in the LICENSE file.
 #pragma once
 
 #include "Stdafx.h"
 
+#include "include\base\cef_logging.h"
 #include "CefBrowserWrapper.h"
 #include "CefAppUnmanagedWrapper.h"
 #include "JavascriptRootObjectWrapper.h"
@@ -111,7 +112,7 @@ namespace CefSharp
 
     void CefAppUnmanagedWrapper::OnFocusedNodeChanged(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, CefRefPtr<CefDOMNode> node)
     {
-        if (!_enableFocusedNodeChanged)
+        if (!_focusedNodeChangedEnabled)
         {
             return;
         }
@@ -423,14 +424,20 @@ namespace CefSharp
 
     void CefAppUnmanagedWrapper::OnRenderThreadCreated(CefRefPtr<CefListValue> extraInfo)
     {
-        auto extensionList = extraInfo->GetList(0);
-
-        for (size_t i = 0; i < extensionList->GetSize(); i++)
+        //Check to see if we have a list
+        if (extraInfo.get())
         {
-            auto extension = extensionList->GetList(i);
-            auto ext = gcnew CefExtension(StringUtils::ToClr(extension->GetString(0)), StringUtils::ToClr(extension->GetString(1)));
+            auto extensionList = extraInfo->GetList(0);
+            if (extensionList.get())
+            {
+                for (size_t i = 0; i < extensionList->GetSize(); i++)
+                {
+                    auto extension = extensionList->GetList(i);
+                    auto ext = gcnew CefExtension(StringUtils::ToClr(extension->GetString(0)), StringUtils::ToClr(extension->GetString(1)));
 
-            _extensions->Add(ext);
+                    _extensions->Add(ext);
+                }
+            }
         }
     }
 

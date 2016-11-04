@@ -1,8 +1,9 @@
-﻿// Copyright © 2010-2015 The CefSharp Project. All rights reserved.
+﻿// Copyright © 2010-2016 The CefSharp Project. All rights reserved.
 //
 // Use of this source code is governed by a BSD-style license that can be found in the LICENSE file.
 
 using System.Threading.Tasks;
+using CefSharp.Internals;
 
 namespace CefSharp
 {
@@ -17,7 +18,7 @@ namespace CefSharp
 
         public void OnComplete()
         {
-            taskCompletionSource.SetResult(true);
+            taskCompletionSource.TrySetResultAsync(true);
         }
 
         public Task<bool> Task

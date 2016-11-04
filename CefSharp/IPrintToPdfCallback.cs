@@ -1,14 +1,16 @@
-﻿// Copyright © 2010-2015 The CefSharp Authors. All rights reserved.
+﻿// Copyright © 2010-2016 The CefSharp Authors. All rights reserved.
 //
 // Use of this source code is governed by a BSD-style license that can be found in the LICENSE file.
+
+using System;
 
 namespace CefSharp
 {
     /// <summary>
-    /// Callback interface for <see cref="IBrowserHost.PrintToPDF"/>. The methods of this interface
-    /// will be called on the browser process UI thread.
+    /// Callback interface for <see cref="IBrowserHost.PrintToPdf"/>. The methods of this interface
+    /// will be called on the CEF UI thread.
     /// </summary>
-    public interface IPrintToPdfCallback
+    public interface IPrintToPdfCallback : IDisposable
     {
         /// <summary>
         /// Method that will be executed when the PDF printing has completed.

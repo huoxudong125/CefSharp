@@ -1,4 +1,4 @@
-// Copyright © 2010-2015 The CefSharp Authors. All rights reserved.
+// Copyright © 2010-2016 The CefSharp Authors. All rights reserved.
 //
 // Use of this source code is governed by a BSD-style license that can be found in the LICENSE file.
 
@@ -15,19 +15,24 @@ namespace CefSharp
         public CefBrowserProcessHandler
     {
         gcroot<CefSettings^> _cefSettings;
-        gcroot<Action^> _onContextInitialized;
+        gcroot<IBrowserProcessHandler^> _browserProcessHandler;
 
     public:
-        CefSharpApp(CefSettings^ cefSettings, Action^ onContextInitialized) :
+        CefSharpApp(CefSettings^ cefSettings, IBrowserProcessHandler^ browserProcessHandler) :
             _cefSettings(cefSettings),
-            _onContextInitialized(onContextInitialized)
+            _browserProcessHandler(browserProcessHandler)
         {
+            if (cefSettings->ExternalMessagePump && Object::ReferenceEquals(_browserProcessHandler, nullptr))
+            {
+                throw gcnew Exception("browserProcessHandler cannot be null when using cefSettings.ExternalMessagePump");
+            }
         }
 
         ~CefSharpApp()
         {
             _cefSettings = nullptr;
-            _onContextInitialized = nullptr;
+            delete _browserProcessHandler;
+            _browserProcessHandler = nullptr;
         }
 
         virtual CefRefPtr<CefBrowserProcessHandler> GetBrowserProcessHandler() OVERRIDE
@@ -37,10 +42,15 @@ namespace CefSharp
 
         virtual void OnContextInitialized() OVERRIDE
         {
-            if (!Object::ReferenceEquals(_onContextInitialized, nullptr))
+            if (!Object::ReferenceEquals(_browserProcessHandler, nullptr))
             {
-                _onContextInitialized->Invoke();
+                _browserProcessHandler->OnContextInitialized();
             }
+        }
+
+        virtual void OnScheduleMessagePumpWork(int64 delay_ms)  OVERRIDE
+        {
+            _browserProcessHandler->OnScheduleMessagePumpWork(delay_ms);
         }
 
         virtual void OnBeforeChildProcessLaunch(CefRefPtr<CefCommandLine> commandLine) OVERRIDE
@@ -67,9 +77,9 @@ namespace CefSharp
                 commandLine->AppendArgument(StringUtils::ToNative(CefSharpArguments::CustomSchemeArgument + argument));
             }
 
-            if (_cefSettings->EnableFocusedNodeChanged)
+            if (_cefSettings->FocusedNodeChangedEnabled)
             {
-                commandLine->AppendArgument(StringUtils::ToNative(CefSharpArguments::EnableFocusedNodeChangedArgument));
+                commandLine->AppendArgument(StringUtils::ToNative(CefSharpArguments::FocusedNodeChangedEnabledArgument));
             }
         }
         

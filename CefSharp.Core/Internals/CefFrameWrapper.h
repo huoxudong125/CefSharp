@@ -1,4 +1,4 @@
-// Copyright © 2010-2015 The CefSharp Project. All rights reserved.
+// Copyright © 2010-2016 The CefSharp Project. All rights reserved.
 //
 // Use of this source code is governed by a BSD-style license that can be found in the LICENSE file.
 
@@ -23,7 +23,7 @@ namespace CefSharp
         // methods of this class may only be called on the main thread.
         ///
         /*--cef(source=library)--*/
-        public ref class CefFrameWrapper : public IFrame, public CefWrapper
+        private ref class CefFrameWrapper : public IFrame, public CefWrapper
         {
         private:
             MCefRefPtr<CefFrame> _frame;
@@ -123,11 +123,25 @@ namespace CefSharp
             virtual Task<String^>^ GetSourceAsync();
 
             ///
+            // Retrieve this frame's HTML source as a string sent to the specified
+            // visitor.
+            ///
+            /*--cef()--*/
+            virtual void GetSource(IStringVisitor^ visitor);
+
+            ///
             // Retrieve this frame's display text as a string sent to the specified
             // visitor.
             ///
             /*--cef()--*/
             virtual Task<String^>^ GetTextAsync();
+
+            ///
+            // Retrieve this frame's display text as a string sent to the specified
+            // visitor.
+            ///
+            /*--cef()--*/
+            virtual void GetText(IStringVisitor^ visitor);
 
             ///
             /// Load the request represented by the |request| object.
@@ -240,6 +254,8 @@ namespace CefSharp
             }
 
             virtual IRequest^ CreateRequest(bool initializePostData);
+
+            void ThrowIfFrameInvalid();
         };
     }
 }
